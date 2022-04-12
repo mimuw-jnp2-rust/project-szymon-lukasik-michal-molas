@@ -1,27 +1,26 @@
-# Frobnicator
+# TreeChat
 
 ## Autorzy
-- Andrzej Głuszak (gr 9, @agluszak na githubie)
-- Linus Torvalds (Uniwersytet Helsiński, @torvalds na githubie)
+- Szymon Łukasik (gr 9, @SzymonLukasik na githubie)
+- Michał Molas (gr 9, @michal-molas na githubie)
 
 ## Opis
-Od zawsze chcieliśmy napisać grę komputerową.
-Frobnicator będzie to gra platformowa, w której chodzi o to, żeby...
+Od zawsze chcieliśmy napisać aplikację do chatu.
 
-Z grubsza będziemy wzorować się na [tym tutorialu](https://dev.to/sbelzile/rust-platformer-part-1-bevy-and-ecs-2pci).
+
+Z grubsza będziemy wzorować się na tym tutorialu https://www.youtube.com/watch?v=Iapc-qGTEBQ.
+Możliwe, że też na tym w szczegolności gdybyśmy chcieli P2P https://github.com/lemunozm/termchat.
 
 ## Funkcjonalność
-- Generowanie map
-- Strzelanie
-- AI dla wrogów (bardziej rozbudowane niż w tutorialu)
-- Możliwość zapisywania i wczytywania stanu gry
-- Punktacja
+- Jakaś współbieżność
+- Grupowanie wątków konwersjacji w drzewa
+- Możliwość streamingu
 
 ## Propozycja podziału na części
-W pierwszej części stworzymy grę opartą na tutorialu (z lepszym AI) i jedną zahardcodowaną planszą.
+W pierwszej części stworzymy prosty server, GUI i streaming. A w kolejnej dodamy współbieżność i pozostałe feature'y.
 
-W drugiej części dodamy do tego losowy generator map, zapisywanie/wczytywanie stanu gry oraz system punktacji.
 
 ## Biblioteki
-- Bevy
-- może coś do serializacji danych? (czy mógłby Pan coś polecić?)
+- Tokio
+- Wstępnie spróbujemy nie korzystać z Matrixa i Discorda, ale zobaczymy
+- Nie wybraliśmy jeszcze bibliotek do GUI
