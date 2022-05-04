@@ -1,4 +1,4 @@
-# TreeChat
+# TagChat
 
 ## Autorzy
 - Szymon Łukasik (gr 9, @SzymonLukasik na githubie)
@@ -7,20 +7,23 @@
 ## Opis
 Od zawsze chcieliśmy napisać aplikację do chatu.
 
-
 Z grubsza będziemy wzorować się na tym tutorialu https://www.youtube.com/watch?v=Iapc-qGTEBQ.
 Możliwe, że też na tym w szczegolności gdybyśmy chcieli P2P https://github.com/lemunozm/termchat.
 
 ## Funkcjonalność
-- Jakaś współbieżność
-- Grupowanie wątków konwersjacji w drzewa
-- Możliwość streamingu
+- Możliwość tagowania fragmentów konwersacji, to mogłoby umożliwiać:
+  - określanie tematyki fragmentu konwersacji
+  - grupowanie fragmentów konwersacji po tagach
+  - zwracanie wyników wyszukiwania pogrupowanych według tagów
+- Użycie współbieżności
+- Możliwość połączenia video i udostępniania ekranu
 
 ## Propozycja podziału na części
-W pierwszej części stworzymy prosty server, GUI i streaming. A w kolejnej dodamy współbieżność i pozostałe feature'y.
+W pierwszej części stworzymy prosty server i GUI, jeśli zdążymy z możliwośćią wyszukiwania. 
+A w kolejnej dodamy współbieżność i połączenia video.
 
 
 ## Biblioteki
-- Tokio
-- Wstępnie spróbujemy nie korzystać z Matrixa i Discorda, ale zobaczymy
-- Nie wybraliśmy jeszcze bibliotek do GUI
+- Tokio.
+- Wstępnie spróbujemy nie korzystać z Matrixa i Discorda, ale zobaczymy.
+- Nie wybraliśmy jeszcze bibliotek do GUI.
