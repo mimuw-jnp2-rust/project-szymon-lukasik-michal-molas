@@ -1,6 +1,6 @@
 [package]
 name = "tagchat"
-default-run = "tagchat_bin"
+default-run = "tagchat_gui"
 version = "0.1.0"
 authors = ["Michał Molas, Szymon Łukasik"]
 edition = "2021"
@@ -9,8 +9,16 @@ rust-version = "1.60"
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
 [[bin]]
-name = "tagchat_bin"
+name = "tagchat_gui"
 path = "src/main.rs"
+
+[[bin]]
+name = "tokio_chat"
+path = "src/chat.rs"
+
+[[bin]]
+name = "tokio_client"
+path = "src/connect.rs"
 
 [lib]
 crate-type = ["cdylib", "rlib"]
@@ -20,6 +28,16 @@ crate-type = ["cdylib", "rlib"]
 egui = "0.18.0"
 eframe = { version = "0.18.0", features = ["persistence"] }
 serde = { version = "1", features = ["derive"] } # You only need this if you want app persistence
+tokio = { version = "1.0.0", features = ["full", "tracing"] }
+tokio-util = { version = "0.7.0", features = ["full"] }
+tokio-stream = { version = "0.1" }
+
+futures = { version = "0.3.0", features = ["thread-pool"]}
+tracing = "0.1"
+tracing-subscriber = { version = "0.3.1", default-features = false, features = ["fmt", "ansi", "env-filter", "tracing-log"] }
+bytes = "1.0.0"
+poll-promise = { version = "0.1", features = ["tokio"] }
+
 
 # native:
 [target.'cfg(not(target_arch = "wasm32"))'.dependencies]

@@ -1,3 +1,15 @@
+use poll_promise::Promise;
+use tokio::io;
+use tokio_util::codec::{BytesCodec, FramedRead, FramedWrite};
+use std::env;
+use std::error::Error;
+use std::net::SocketAddr;
+use bytes::Bytes;
+use futures::{future, Sink, SinkExt, Stream, StreamExt};
+use tokio::net::TcpStream;
+use tokio::io::Interest;
+
+
 /// We derive Deserialize/Serialize so we can persist app state on shutdown.
 #[derive(serde::Deserialize, serde::Serialize)]
 #[serde(default)] // if we add new fields, give them default values when deserializing old state
@@ -8,6 +20,8 @@ pub struct TagchatApp {
     shown_messages: Vec<(String, String)>,
 
     search_pattern: String,
+    #[serde(skip)]
+    server_connection: Option<Promise<TcpStream>>,
     // this how you opt-out of serialization of a member
     // #[serde(skip)]
     // value: f32,
@@ -21,6 +35,7 @@ impl Default for TagchatApp {
             all_messages: Vec::new(),
             shown_messages: Vec::new(),
             search_pattern: "".to_owned(),
+            server_connection: None,
         }
     }
 }
@@ -57,7 +72,19 @@ impl eframe::App for TagchatApp {
             all_messages,
             shown_messages,
             search_pattern,
+            server_connection,
         } = self;
+
+        let server_connection = server_connection.get_or_insert_with(|| {
+            Promise::spawn_async(async move {
+                let mut args = env::args().skip(1).collect::<Vec<_>>();
+                let addr = args
+                    .first()
+                    .ok_or("this program requires at least one argument").unwrap();
+                let addr = addr.parse::<SocketAddr>().unwrap();
+                TcpStream::connect(addr).await.expect("Could not connect to server")
+            })
+        });
 
         // Examples of how to create different panels and windows.
         // Pick whichever suits you.
@@ -79,14 +106,19 @@ impl eframe::App for TagchatApp {
         egui::TopBottomPanel::bottom("bottom_panel").show(ctx, |ui| {
             ui.horizontal_centered(|ui| {
                 ui.label("Write your message: ");
-                let response = ui.text_edit_singleline(write_msg);
-                if response.lost_focus() && ui.input().key_pressed(egui::Key::Enter) {
-                    all_messages.push((name.to_string(), write_msg.to_string()));
-                    write_msg.clear();
-                    shown_messages.clear();
-                    let all_m = &mut all_messages.clone();
-                    shown_messages.append(all_m);
+                if let Some(server_connection) = server_connection.ready() {
+                    let response = ui.text_edit_singleline(write_msg);
+                    if response.lost_focus() && ui.input().key_pressed(egui::Key::Enter) {
+                        all_messages.push((name.to_string(), write_msg.to_string()));
+                        write_msg.clear();
+                        shown_messages.clear();
+                        let all_m = &mut all_messages.clone();
+                        shown_messages.append(all_m);
+                    }
+                } else {
+                    ui.spinner();
                 }
+                
 
                 // if ui.button("Clear").clicked() {
                 //     all_messages.clear();
@@ -123,7 +155,17 @@ impl eframe::App for TagchatApp {
                     let mut s = m.0.to_string();
                     s.push_str(": ");
                     s.push_str(m.1.as_str());
-                    ui.heading(s);
+                    ui.with_layout(
+                        egui::Layout::top_down(
+                            if m.1.to_string().len() % 2 == 0 {
+                                egui::Align::LEFT
+                            } else {
+                                egui::Align::RIGHT
+                            }),
+                        |ui| {
+                            ui.label(egui::RichText::new(s).size(23.0));
+                        },
+                    );
                 }
             });
         });
