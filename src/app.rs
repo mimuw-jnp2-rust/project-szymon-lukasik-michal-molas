@@ -9,6 +9,11 @@ use futures::{future, Sink, SinkExt, Stream, StreamExt};
 use tokio::net::TcpStream;
 use tokio::io::Interest;
 
+#[derive(serde::Deserialize, serde::Serialize, Clone)]
+enum Message {
+    FromMe(String),
+    ToMe(String, String)
+}
 
 /// We derive Deserialize/Serialize so we can persist app state on shutdown.
 #[derive(serde::Deserialize, serde::Serialize)]
@@ -16,8 +21,8 @@ use tokio::io::Interest;
 pub struct TagchatApp {
     name: String,
     write_msg: String,
-    all_messages: Vec<(String, String)>,
-    shown_messages: Vec<(String, String)>,
+    all_messages: Vec<Message>,
+    shown_messages: Vec<Message>,
 
     search_pattern: String,
     #[serde(skip)]
@@ -106,19 +111,17 @@ impl eframe::App for TagchatApp {
         egui::TopBottomPanel::bottom("bottom_panel").show(ctx, |ui| {
             ui.horizontal_centered(|ui| {
                 ui.label("Write your message: ");
-                if let Some(server_connection) = server_connection.ready() {
+                if let Some(stream) = server_connection.ready() {
                     let response = ui.text_edit_singleline(write_msg);
                     if response.lost_focus() && ui.input().key_pressed(egui::Key::Enter) {
-                        all_messages.push((name.to_string(), write_msg.to_string()));
+                        let ref new_message = Message::FromMe(write_msg.to_string());
+                        all_messages.push(new_message.clone());
+                        shown_messages.push(new_message.clone());
                         write_msg.clear();
-                        shown_messages.clear();
-                        let all_m = &mut all_messages.clone();
-                        shown_messages.append(all_m);
                     }
                 } else {
                     ui.spinner();
                 }
-                
 
                 // if ui.button("Clear").clicked() {
                 //     all_messages.clear();
@@ -135,9 +138,13 @@ impl eframe::App for TagchatApp {
                 if response.changed() {
                     shown_messages.clear();
                     for m in all_messages {
-                        let m_str = m.1.as_str();
+                        let m_str = match m {
+                            Message::FromMe(content) => content,
+                            Message::ToMe(_, content) => content,
+                        };
+
                         if m_str.contains(search_pattern.as_str()) {
-                            shown_messages.push((m.0.to_string(), m_str.to_string()));
+                            shown_messages.push(m.clone());
                         }
                     }
                 }
@@ -151,17 +158,14 @@ impl eframe::App for TagchatApp {
             // sa = sa.always_show_scroll(true);
             sa = sa.max_height(f32::INFINITY);
             sa.show(ui, |ui| {
-                for m in shown_messages.clone() {
-                    let mut s = m.0.to_string();
-                    s.push_str(": ");
-                    s.push_str(m.1.as_str());
+                for m in shown_messages {
+                    let (sender, content, align): (&String, &String, egui::Align) = match m {
+                        Message::FromMe(content) => (&self.name, content, egui::Align::RIGHT),
+                        Message::ToMe(sender, content) => (sender, content, egui::Align::LEFT)
+                    };
+                    let s = sender.clone() + ": " + content;
                     ui.with_layout(
-                        egui::Layout::top_down(
-                            if m.1.to_string().len() % 2 == 0 {
-                                egui::Align::LEFT
-                            } else {
-                                egui::Align::RIGHT
-                            }),
+                        egui::Layout::top_down(align),
                         |ui| {
                             ui.label(egui::RichText::new(s).size(23.0));
                         },
