@@ -59,13 +59,12 @@ impl TagchatApp {
         let rt = Builder::new_current_thread().enable_all().build().unwrap();
 
         let args = env::args().skip(1).collect::<Vec<_>>();
-        let addr = args
-            .first()
-            .ok_or("this program requires at least one argument")
-            .unwrap();
+
+        let addr = args.get(0).ok_or("Please specify server address").unwrap();
         let addr = addr.parse::<SocketAddr>().unwrap();
 
-        let name = "Szymon";
+        let name = args.get(1).ok_or("Please specify your username").unwrap();
+        let name_clone = name.clone();
 
         std::thread::spawn(move || {
             rt.block_on(async move {
@@ -73,7 +72,7 @@ impl TagchatApp {
                 let stream = stream.unwrap();
                 let (mut read, mut write) = tokio::io::split(stream);
                 write
-                    .write_all((name.to_owned() + "\r\n").as_bytes())
+                    .write_all((name_clone + "\r\n").as_bytes())
                     .await
                     .unwrap();
 
