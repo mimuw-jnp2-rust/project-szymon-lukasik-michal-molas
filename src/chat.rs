@@ -175,7 +175,7 @@ async fn process(
     let mut lines = Framed::new(stream, LinesCodec::new());
 
     // Send a prompt to the client to enter their username.
-    
+
     // lines.send("Please enter your username:").await?;
 
     // Read the first line from the `LineCodec` stream to get the username.
