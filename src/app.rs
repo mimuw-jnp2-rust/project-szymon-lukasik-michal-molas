@@ -1,13 +1,10 @@
-use poll_promise::Promise;
-use tokio::io;
-use tokio_util::codec::{BytesCodec, FramedRead, FramedWrite};
-use std::env;
-use std::error::Error;
-use std::net::SocketAddr;
-use bytes::Bytes;
-use futures::{future, Sink, SinkExt, Stream, StreamExt};
+use tokio::io::{AsyncWriteExt, AsyncReadExt};
 use tokio::net::TcpStream;
-use tokio::io::Interest;
+use tokio::runtime::Builder;
+use tokio::sync::mpsc::{Sender, Receiver, channel};
+use tokio_util::codec::{FramedRead, LinesCodec};
+use std::net::SocketAddr;
+use std::env;
 
 #[derive(serde::Deserialize, serde::Serialize, Clone)]
 enum Message {
@@ -23,24 +20,25 @@ pub struct TagchatApp {
     write_msg: String,
     all_messages: Vec<Message>,
     shown_messages: Vec<Message>,
-
     search_pattern: String,
+
     #[serde(skip)]
-    server_connection: Option<Promise<TcpStream>>,
-    // this how you opt-out of serialization of a member
+    send: Sender<Message>,
     // #[serde(skip)]
-    // value: f32,
+    // recv: Receiver<Message>
 }
 
 impl Default for TagchatApp {
     fn default() -> Self {
+        let (send, recv) = channel(1024);
         Self {
-            name: "Michal".to_owned(),
-            write_msg: "".to_owned(),
-            all_messages: Vec::new(),
-            shown_messages: Vec::new(),
-            search_pattern: "".to_owned(),
-            server_connection: None,
+            name: Default::default(), 
+            write_msg: Default::default(), 
+            all_messages: Default::default(), 
+            shown_messages: Default::default(), 
+            search_pattern: Default::default(), 
+            
+            send, 
         }
     }
 }
@@ -57,7 +55,72 @@ impl TagchatApp {
         //     return eframe::get_value(storage, eframe::APP_KEY).unwrap_or_default();
         // }
 
-        Default::default()
+        let (send, mut recv) = channel(1024);
+
+        let rt = Builder::new_current_thread()
+            .enable_all()
+            .build()
+            .unwrap();
+
+        let mut args = env::args().skip(1).collect::<Vec<_>>();
+        let addr = args
+            .first()
+            .ok_or("this program requires at least one argument").unwrap();
+        let addr = addr.parse::<SocketAddr>().unwrap();
+
+        let name = "Szymon";
+
+        std::thread::spawn(move || {
+            rt.block_on(async move {
+                let stream = TcpStream::connect(addr).await;
+                let mut stream = stream.unwrap(); 
+                let (mut read, mut write) = tokio::io::split(stream);
+                let sent = write.write((name.to_owned() + "\r\n").as_bytes()).await.unwrap();
+                println!("SENT {} BYTES", sent);
+
+                tokio::spawn(async move {
+                    while let Some(message) = recv.recv().await {
+                        println!("RECEIVED MESSAGE\n");
+                        match message {
+                            Message::FromMe(conent) => {
+                                let n_sent = write.write((conent + "\r\n").as_bytes()).await.unwrap();
+                                println!("SENT {} BYTES", n_sent);                        
+                            },
+                            _ => {
+                                panic!("Tried to send wrong message.");
+                            }
+                        }
+                    }
+                }).await.unwrap();
+
+                // wykomentowanie sprawia ze moveujemy send 
+
+
+                // let ref mut buffer = vec![0; 1024];
+                // tokio::spawn(async move {
+                //     loop {
+                //         let n_read = read.read(buffer).await.unwrap();
+                //         if let Ok(raw_message) = String::from_utf8(buffer[..n_read].to_vec()) {
+                //             if let Some((sender, content)) = raw_message.split_once(':') {
+                //                 send.send(Message::ToMe(sender.to_string(), content.to_string()));
+                //             }
+                //         }
+                //     }
+                // });
+            });
+        });
+
+        // let framed = Framed::new(stream, LinesCodec::new_with_max_length(1024));
+        
+        Self {
+            name: name.to_owned(),
+            write_msg: "".to_owned(),
+            all_messages: Vec::new(),
+            shown_messages: Vec::new(),
+            search_pattern: "".to_owned(),
+
+            send,
+        }
     }
 }
 
@@ -77,19 +140,8 @@ impl eframe::App for TagchatApp {
             all_messages,
             shown_messages,
             search_pattern,
-            server_connection,
+            send,
         } = self;
-
-        let server_connection = server_connection.get_or_insert_with(|| {
-            Promise::spawn_async(async move {
-                let mut args = env::args().skip(1).collect::<Vec<_>>();
-                let addr = args
-                    .first()
-                    .ok_or("this program requires at least one argument").unwrap();
-                let addr = addr.parse::<SocketAddr>().unwrap();
-                TcpStream::connect(addr).await.expect("Could not connect to server")
-            })
-        });
 
         // Examples of how to create different panels and windows.
         // Pick whichever suits you.
@@ -111,16 +163,13 @@ impl eframe::App for TagchatApp {
         egui::TopBottomPanel::bottom("bottom_panel").show(ctx, |ui| {
             ui.horizontal_centered(|ui| {
                 ui.label("Write your message: ");
-                if let Some(stream) = server_connection.ready() {
-                    let response = ui.text_edit_singleline(write_msg);
-                    if response.lost_focus() && ui.input().key_pressed(egui::Key::Enter) {
-                        let ref new_message = Message::FromMe(write_msg.to_string());
-                        all_messages.push(new_message.clone());
-                        shown_messages.push(new_message.clone());
-                        write_msg.clear();
-                    }
-                } else {
-                    ui.spinner();
+                let response = ui.text_edit_singleline(write_msg);
+                if response.lost_focus() && ui.input().key_pressed(egui::Key::Enter) {
+                    let new_message = Message::FromMe(write_msg.to_string());
+                    send.blocking_send(new_message.clone());
+                    all_messages.push(new_message.clone());
+                    shown_messages.push(new_message);
+                    write_msg.clear();
                 }
 
                 // if ui.button("Clear").clicked() {
@@ -137,7 +186,7 @@ impl eframe::App for TagchatApp {
                 let response = ui.text_edit_singleline(search_pattern);
                 if response.changed() {
                     shown_messages.clear();
-                    for m in all_messages {
+                    for ref m in all_messages.clone() {
                         let m_str = match m {
                             Message::FromMe(content) => content,
                             Message::ToMe(_, content) => content,
@@ -158,12 +207,12 @@ impl eframe::App for TagchatApp {
             // sa = sa.always_show_scroll(true);
             sa = sa.max_height(f32::INFINITY);
             sa.show(ui, |ui| {
-                for m in shown_messages {
-                    let (sender, content, align): (&String, &String, egui::Align) = match m {
-                        Message::FromMe(content) => (&self.name, content, egui::Align::RIGHT),
+                for m in all_messages.clone() {
+                    let (sender, content, align) = match m {
+                        Message::FromMe(content) => (self.name.clone(), content, egui::Align::RIGHT),
                         Message::ToMe(sender, content) => (sender, content, egui::Align::LEFT)
                     };
-                    let s = sender.clone() + ": " + content;
+                    let s = sender.clone() + ": " + &content;
                     ui.with_layout(
                         egui::Layout::top_down(align),
                         |ui| {
