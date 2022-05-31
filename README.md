@@ -7,6 +7,7 @@
 ## Opis
 Od zawsze chcieliśmy napisać aplikację do chatu.
 
+## Inspiracje
 Z grubsza będziemy wzorować się na tym tutorialu https://www.youtube.com/watch?v=Iapc-qGTEBQ.
 Możliwe, że też na tym w szczegolności gdybyśmy chcieli P2P https://github.com/lemunozm/termchat.
 
@@ -24,6 +25,11 @@ Pracując nad pierwszą częścią inspirowaliśmy się przykładami:
 - Użycie współbieżności
 - Możliwość połączenia video i udostępniania ekranu
 
+## Propozycja podziału na części
+W pierwszej części stworzymy prosty server i GUI, jeśli zdążymy z możliwośćią wyszukiwania. 
+A w kolejnej dodamy współbieżność i połączenia video.
+
+## Część Pierwsza
 W pierwszej części największą trudnością okazało się zintegrowanie GUI z kodem asynchronicznym.
 Do obsługi połączenia TCP wykorzystujemy bibliotekę tokio.
 Z początku, w celu połączenia egui z tokio inspirowaliśmy się sugestią twórcy biblioteki egui:
@@ -41,3 +47,4 @@ W kolejnej części moglibyśmy na przykład dodać możliwość tagowania frag
 ## Biblioteki
 - tokio
 - egui
+- eframe (framework do egui)
