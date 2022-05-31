@@ -154,7 +154,7 @@ impl eframe::App for TagchatApp {
                 let response = ui.text_edit_singleline(write_msg);
                 if response.lost_focus() && ui.input().key_pressed(egui::Key::Enter) {
                     let new_message = Message::FromMe(write_msg.to_string());
-                    send.blocking_send(new_message.clone()).unwrap();
+                    send.blocking_send(new_message.clone()).unwrap_or_default();
                     all_messages.push(new_message.clone());
                     shown_messages.push(new_message);
                     write_msg.clear();
