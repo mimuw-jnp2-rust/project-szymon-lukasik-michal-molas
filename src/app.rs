@@ -76,17 +76,15 @@ impl TagchatApp {
                 let stream = stream.unwrap();
                 let (mut read, mut write) = tokio::io::split(stream);
                 write
-                    .write((name.to_owned() + "\r\n").as_bytes())
+                    .write_all((name.to_owned() + "\r\n").as_bytes())
                     .await
                     .unwrap();
-                // println!("SENT {} BYTES", sent);
 
                 let write_to_server = tokio::spawn(async move {
                     while let Some(message) = recv.recv().await {
                         match message {
                             Message::FromMe(conent) => {
-                                write.write((conent + "\r\n").as_bytes()).await.unwrap();
-                                // println!("SENT {} BYTES", n_sent);
+                                write.write_all((conent + "\r\n").as_bytes()).await.unwrap();
                             }
                             _ => {
                                 panic!("Tried to send wrong message.");
