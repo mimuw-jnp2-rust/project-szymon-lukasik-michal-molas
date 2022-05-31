@@ -1,3 +1,4 @@
+use futures::future::join_all;
 use tokio::io::{AsyncWriteExt, AsyncReadExt};
 use tokio::net::TcpStream;
 use tokio::runtime::Builder;
@@ -6,7 +7,7 @@ use tokio_util::codec::{FramedRead, LinesCodec};
 use std::net::SocketAddr;
 use std::env;
 
-#[derive(serde::Deserialize, serde::Serialize, Clone)]
+#[derive(serde::Deserialize, serde::Serialize, Clone, Debug)]
 enum Message {
     FromMe(String),
     ToMe(String, String)
@@ -24,8 +25,8 @@ pub struct TagchatApp {
 
     #[serde(skip)]
     send: Sender<Message>,
-    // #[serde(skip)]
-    // recv: Receiver<Message>
+    #[serde(skip)]
+    recv: Receiver<Message>
 }
 
 impl Default for TagchatApp {
@@ -38,7 +39,8 @@ impl Default for TagchatApp {
             shown_messages: Default::default(), 
             search_pattern: Default::default(), 
             
-            send, 
+            send,
+            recv,
         }
     }
 }
@@ -55,8 +57,9 @@ impl TagchatApp {
         //     return eframe::get_value(storage, eframe::APP_KEY).unwrap_or_default();
         // }
 
-        let (send, mut recv) = channel(1024);
-
+        let (my_send, mut recv) = channel(1024);
+        let (send, my_recv) = channel(1024);
+    
         let rt = Builder::new_current_thread()
             .enable_all()
             .build()
@@ -76,37 +79,35 @@ impl TagchatApp {
                 let mut stream = stream.unwrap(); 
                 let (mut read, mut write) = tokio::io::split(stream);
                 let sent = write.write((name.to_owned() + "\r\n").as_bytes()).await.unwrap();
-                println!("SENT {} BYTES", sent);
+                // println!("SENT {} BYTES", sent);
 
-                tokio::spawn(async move {
+                let write_to_server = tokio::spawn(async move {
                     while let Some(message) = recv.recv().await {
-                        println!("RECEIVED MESSAGE\n");
                         match message {
                             Message::FromMe(conent) => {
                                 let n_sent = write.write((conent + "\r\n").as_bytes()).await.unwrap();
-                                println!("SENT {} BYTES", n_sent);                        
+                                // println!("SENT {} BYTES", n_sent);                        
                             },
                             _ => {
                                 panic!("Tried to send wrong message.");
                             }
                         }
                     }
-                }).await.unwrap();
+                });
 
-                // wykomentowanie sprawia ze moveujemy send 
+                let mut buffer = vec![0; 1024];
+                let read_from_server = tokio::spawn(async move {
+                    loop {
+                        let n_read = read.read(&mut buffer).await.unwrap();
+                        if let Ok(raw_message) = String::from_utf8(buffer[..n_read].to_vec()) {
+                            if let Some((sender, content)) = raw_message.split_once(':') {
+                                send.send(Message::ToMe(sender.to_string(), content.to_string())).await.unwrap();
+                            }
+                        }
+                    }
+                });
 
-
-                // let ref mut buffer = vec![0; 1024];
-                // tokio::spawn(async move {
-                //     loop {
-                //         let n_read = read.read(buffer).await.unwrap();
-                //         if let Ok(raw_message) = String::from_utf8(buffer[..n_read].to_vec()) {
-                //             if let Some((sender, content)) = raw_message.split_once(':') {
-                //                 send.send(Message::ToMe(sender.to_string(), content.to_string()));
-                //             }
-                //         }
-                //     }
-                // });
+                join_all(vec![write_to_server, read_from_server]).await;
             });
         });
 
@@ -119,7 +120,8 @@ impl TagchatApp {
             shown_messages: Vec::new(),
             search_pattern: "".to_owned(),
 
-            send,
+            send: my_send,
+            recv: my_recv,
         }
     }
 }
@@ -141,6 +143,7 @@ impl eframe::App for TagchatApp {
             shown_messages,
             search_pattern,
             send,
+            recv,
         } = self;
 
         // Examples of how to create different panels and windows.
@@ -178,6 +181,11 @@ impl eframe::App for TagchatApp {
                 // }
             });
         });
+
+        if let Ok(message) = recv.try_recv() {
+            all_messages.push(message.clone());
+            shown_messages.push(message);
+        }
         
         // searching
         egui::SidePanel::left("side_panel").show(ctx, |ui| {
