@@ -1,6 +1,6 @@
 [package]
 name = "tagchat"
-default-run = "tagchat_gui"
+default-run = "client"
 version = "0.1.0"
 authors = ["Michał Molas, Szymon Łukasik"]
 edition = "2021"
@@ -9,16 +9,12 @@ rust-version = "1.60"
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
 [[bin]]
-name = "tagchat_gui"
+name = "client"
 path = "src/main.rs"
 
 [[bin]]
-name = "tokio_chat"
+name = "server"
 path = "src/chat.rs"
-
-[[bin]]
-name = "tokio_client"
-path = "src/connect.rs"
 
 [lib]
 crate-type = ["cdylib", "rlib"]
@@ -51,14 +47,3 @@ tracing-wasm = "0.2"
 
 [profile.release]
 opt-level = 2 # fast and small wasm
-
-
-[patch.crates-io]
-
-# If you want to use the bleeding edge version of egui and eframe:
-# egui = { git = "https://github.com/emilk/egui", branch = "master" }
-# eframe = { git = "https://github.com/emilk/egui", branch = "master" }
-
-# If you fork https://github.com/emilk/egui you can test with:
-# egui = { path = "../egui/egui" }
-# eframe = { path = "../egui/eframe" }
