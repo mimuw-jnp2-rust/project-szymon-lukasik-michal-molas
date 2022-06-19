@@ -28,19 +28,50 @@ fn parse_addr(s: &str) -> Result<SocketAddr, String> {
         .and_then(|mut iter| iter.next().ok_or_else(|| "No address found".to_string()))
 }
 
-/// We derive Deserialize/Serialize so we can persist app state on shutdown.
 #[derive(serde::Deserialize, serde::Serialize)]
-#[serde(default)] // if we add new fields, give them default values when deserializing old state
+#[serde(default)]
+struct SerializedState {
+    messages: Vec<(String, String)>,
+}
+
+impl SerializedState {
+    fn get_messages(&self, name: String) -> Vec<Message> {
+        self.messages.iter().map(|x| match &x.0 {
+            _ if x.0.eq(&name) => {
+                Message::FromMe(x.1.clone())
+            },
+            _ => {
+                Message::ToMe(x.0.clone(), x.1.clone())
+            }
+        }).collect()
+    }
+
+    fn add_message(&mut self, mess: Message, name: String) {
+        self.messages.push(match mess {
+            Message::FromMe(content) => (name, content),
+            Message::ToMe(sender_name, content) => (sender_name, content),
+        });
+    }
+}
+
+impl Default for SerializedState {
+    fn default() -> Self {
+        Self {
+            messages: Default::default(),
+        }
+    }
+}
+
 pub struct TagchatApp {
+    state: SerializedState,
+
     name: String,
     write_msg: String,
     all_messages: Vec<Message>,
     shown_messages: Vec<Message>,
     search_pattern: String,
 
-    #[serde(skip)]
     send: Sender<Message>,
-    #[serde(skip)]
     recv: Receiver<Message>,
 }
 
@@ -48,6 +79,7 @@ impl Default for TagchatApp {
     fn default() -> Self {
         let (send, recv) = channel(1024);
         Self {
+            state: Default::default(),
             name: Default::default(),
             write_msg: Default::default(),
             all_messages: Default::default(),
@@ -63,12 +95,6 @@ impl Default for TagchatApp {
 impl TagchatApp {
     /// Called once before the first frame.
     pub fn new(_cc: &eframe::CreationContext<'_>) -> Self {
-        // Load previous app state (if any).
-        // Note that you must enable the `persistence` feature for this to work.
-        // if let Some(storage) = cc.storage {
-        //     return eframe::get_value(storage, eframe::APP_KEY).unwrap_or_default();
-        // }
-
         let (my_send, mut recv) = channel(1024);
         let (send, my_recv) = channel(1024);
 
@@ -78,6 +104,16 @@ impl TagchatApp {
 
         let name = args.name.clone();
         let addr = args.server_addr.clone();
+
+        let old_messeges: Vec<Message>;
+        let prev_state: SerializedState;
+        if let Some(storage) = _cc.storage {
+            prev_state = eframe::get_value(storage, eframe::APP_KEY).unwrap_or_default();
+            old_messeges = prev_state.get_messages(name.clone())
+        } else {
+            prev_state = Default::default();
+            old_messeges = Vec::new();
+        }
 
         std::thread::spawn(move || {
             rt.block_on(async move {
@@ -121,10 +157,11 @@ impl TagchatApp {
         });
 
         Self {
+            state: prev_state,
             name: args.name.to_owned(),
             write_msg: "".to_owned(),
-            all_messages: Vec::new(),
-            shown_messages: Vec::new(),
+            all_messages: old_messeges.clone(),
+            shown_messages: old_messeges,
             search_pattern: "".to_owned(),
 
             send: my_send,
@@ -134,13 +171,13 @@ impl TagchatApp {
 }
 
 impl eframe::App for TagchatApp {
-    // fn save(&mut self, storage: &mut dyn eframe::Storage) {
-    //     eframe::set_value(storage, eframe::APP_KEY, self);
-    // }
+    fn save(&mut self, storage: &mut dyn eframe::Storage) {
+        eframe::set_value(storage, eframe::APP_KEY, &self.state);
+    }
 
     fn update(&mut self, ctx: &egui::Context, frame: &mut eframe::Frame) {
-        // let Self { label, value } = self;
         let Self {
+            state,
             name,
             write_msg,
             all_messages,
@@ -169,6 +206,7 @@ impl eframe::App for TagchatApp {
                     let new_message = Message::FromMe(write_msg.to_string());
                     send.blocking_send(new_message.clone()).unwrap_or_default();
                     all_messages.push(new_message.clone());
+                    state.add_message(new_message.clone(), name.clone());
                     shown_messages.push(new_message);
                     write_msg.clear();
                 }
@@ -177,6 +215,7 @@ impl eframe::App for TagchatApp {
 
         if let Ok(message) = recv.try_recv() {
             all_messages.push(message.clone());
+            state.add_message(message.clone(), "".to_string());
             shown_messages.push(message);
         }
 
