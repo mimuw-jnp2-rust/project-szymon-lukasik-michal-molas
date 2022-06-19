@@ -33,11 +33,18 @@ use tokio_util::codec::{Framed, LinesCodec};
 
 use futures::SinkExt;
 use std::collections::HashMap;
-use std::env;
 use std::error::Error;
 use std::io;
 use std::net::SocketAddr;
 use std::sync::Arc;
+use clap::Parser;
+
+#[derive(Parser, Debug, Clone)]
+#[clap(author, version, about, long_about = None)]
+struct Args {
+    #[clap(short, long)]
+    port: u16,
+}
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn Error>> {
@@ -68,9 +75,8 @@ async fn main() -> Result<(), Box<dyn Error>> {
     // client connection.
     let state = Arc::new(Mutex::new(Shared::new()));
 
-    let addr = env::args()
-        .nth(1)
-        .unwrap_or_else(|| "127.0.0.1:6142".to_string());
+    let args: Args = Args::parse();
+    let addr = SocketAddr::from(([127, 0, 0, 1], args.port));
 
     // Bind a TCP listener to the socket address.
     //
