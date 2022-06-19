@@ -1,6 +1,6 @@
+use clap::Parser;
 use futures::future::join_all;
-use std::env;
-use std::net::SocketAddr;
+use std::net::{SocketAddr, ToSocketAddrs};
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::TcpStream;
 use tokio::runtime::Builder;
@@ -10,6 +10,22 @@ use tokio::sync::mpsc::{channel, Receiver, Sender};
 enum Message {
     FromMe(String),
     ToMe(String, String),
+}
+
+#[derive(Parser, Debug, Clone)]
+#[clap(author, version, about, long_about = None)]
+struct Args {
+    #[clap(short, long, parse(try_from_str = parse_addr))]
+    server_addr: SocketAddr,
+
+    #[clap(short, long)]
+    name: String,
+}
+
+fn parse_addr(s: &str) -> Result<SocketAddr, String> {
+    s.to_socket_addrs()
+        .map_err(|e| e.to_string())
+        .and_then(|mut iter| iter.next().ok_or_else(|| "No address found".to_string()))
 }
 
 /// We derive Deserialize/Serialize so we can persist app state on shutdown.
@@ -58,13 +74,10 @@ impl TagchatApp {
 
         let rt = Builder::new_current_thread().enable_all().build().unwrap();
 
-        let args = env::args().skip(1).collect::<Vec<_>>();
+        let args: Args = Args::parse();
 
-        let addr = args.get(0).ok_or("Please specify server address").unwrap();
-        let addr = addr.parse::<SocketAddr>().unwrap();
-
-        let name = args.get(1).ok_or("Please specify your username").unwrap();
-        let name_clone = name.clone();
+        let name = args.name.clone();
+        let addr = args.server_addr.clone();
 
         std::thread::spawn(move || {
             rt.block_on(async move {
@@ -72,7 +85,7 @@ impl TagchatApp {
                 let stream = stream.unwrap();
                 let (mut read, mut write) = tokio::io::split(stream);
                 write
-                    .write_all((name_clone + "\r\n").as_bytes())
+                    .write_all((name + "\r\n").as_bytes())
                     .await
                     .unwrap();
 
@@ -108,7 +121,7 @@ impl TagchatApp {
         });
 
         Self {
-            name: name.to_owned(),
+            name: args.name.to_owned(),
             write_msg: "".to_owned(),
             all_messages: Vec::new(),
             shown_messages: Vec::new(),
