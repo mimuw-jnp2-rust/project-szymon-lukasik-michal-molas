@@ -52,28 +52,28 @@ W kolejnej części moglibyśmy na przykład dodać możliwość tagowania frag
 ## Użytowanie
 W poniższych poleceniach addr jest adresem IPv4 lub IPv6.
 
-W celu uruchomienia serwera pod adresem addr i na porcie port: \
-<code>cargo run --bin server addr:port </code>
+W celu uruchomienia serwera na porcie port: \
+<code>cargo run --bin server -- -p port </code>
 
 W celu uruchomienia klienta z nazwą użytkownika user_name, jeśli server działa pod adresem addr na porcie port:  \
-<code> cargo run --bin client addr:port user_name</code> 
+<code> cargo run --bin client -- -s addr:port -n user_name</code> 
 
 Przykład 1 - Serwer działa lokalnie na porcie 1234
 
 W jednym terminalu: \
-<code>cargo run --bin server [::1]:1234 </code>
+<code>cargo run --bin server -- -p 1234 </code>
 
 W dwóch terminalach: \
-<code> cargo run --bin client [::1]:1234 user_name</code> 
+<code> cargo run --bin client -- -s localhost:1234 user_name</code> 
 
 
 Przykład 2 - Serwer działa na students na porcie 1234
 
 W terminalu na students: \
-<code>cargo run --bin server [2001:6a0:5001:1::3]:1234 </code>
+<code>cargo run --bin server -- -p 1234 </code>
 
 W dwóch terminalach lokalnie: \
-<code> cargo run --bin client [2001:6a0:5001:1::3]:1234 user_name</code>
+<code> cargo run --bin client -- s students.mimuw.edu.pl:1234 -n user_name</code>
 
 
 
