@@ -199,10 +199,10 @@ async fn process(
 
     // A client has connected, let's let everyone know.
     {
-        let mut state = state.lock().await;
-        let msg = format!("{} has joined the chat", username);
-        tracing::info!("{}", msg);
-        state.broadcast(addr, &msg).await;
+        // let mut state = state.lock().await;
+        // let msg = format!("{} has joined the chat", username);
+        // tracing::info!("{}", msg);
+        // state.broadcast(addr, &msg).await;
     }
 
     // Process incoming messages until our stream is exhausted by a disconnect.
@@ -216,10 +216,17 @@ async fn process(
                 // A message was received from the current user, we should
                 // broadcast this message to the other users.
                 Some(Ok(msg)) => {
+                    dbg!(format!("recieved {}", msg));
                     let mut state = state.lock().await;
-                    let msg = format!("{}: {}", username, msg);
 
-                    state.broadcast(addr, &msg).await;
+                    let mut msg_vec: Vec<u8> = vec![username.len() as u8];
+                    msg_vec.extend(username.clone().into_bytes());
+                    msg_vec.extend(msg.into_bytes());
+                    let broadcast_string = String::from_utf8(msg_vec).unwrap();
+
+                    // let msg = format!("{}: {}", username, msg);
+
+                    state.broadcast(addr, &broadcast_string).await;
                 }
                 // An error occurred.
                 Some(Err(e)) => {
