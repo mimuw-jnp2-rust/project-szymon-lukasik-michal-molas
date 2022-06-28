@@ -5,11 +5,28 @@ use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::TcpStream;
 use tokio::runtime::Builder;
 use tokio::sync::mpsc::{channel, Receiver, Sender};
+use std::cmp::{min, max};
 
-#[derive(serde::Deserialize, serde::Serialize, Clone, Debug)]
-enum Message {
-    FromMe(String),
-    ToMe(String, String),
+#[derive(serde::Deserialize, serde::Serialize, Debug, Clone, PartialEq)]
+struct Tag {
+    name: String,
+    color: egui::color::Rgba,
+}
+
+impl Default for Tag {
+    fn default() -> Self {
+        Tag {
+            name: "undefined".into(),
+            color: egui::Rgba::BLACK,
+        }
+    }
+}
+
+#[derive(serde::Deserialize, serde::Serialize, Debug, Clone)]
+struct Message {
+    content: String,
+    tag: Tag,
+    sender: String,
 }
 
 #[derive(Parser, Debug, Clone)]
@@ -28,37 +45,21 @@ fn parse_addr(s: &str) -> Result<SocketAddr, String> {
         .and_then(|mut iter| iter.next().ok_or_else(|| "No address found".to_string()))
 }
 
-#[derive(serde::Deserialize, serde::Serialize)]
+#[derive(serde::Deserialize, serde::Serialize, Debug)]
 #[serde(default)]
 struct SerializedState {
-    messages: Vec<(String, String)>,
-}
-
-impl SerializedState {
-    fn get_messages(&self, name: String) -> Vec<Message> {
-        self.messages.iter().map(|x| match &x.0 {
-            _ if x.0.eq(&name) => {
-                Message::FromMe(x.1.clone())
-            },
-            _ => {
-                Message::ToMe(x.0.clone(), x.1.clone())
-            }
-        }).collect()
-    }
-
-    fn add_message(&mut self, mess: Message, name: String) {
-        self.messages.push(match mess {
-            Message::FromMe(content) => (name, content),
-            Message::ToMe(sender_name, content) => (sender_name, content),
-        });
-    }
+    messages: Vec<Message>,
+    tags: Vec<Tag>
 }
 
 impl Default for SerializedState {
     fn default() -> Self {
-        Self {
+
+        let s = Self {
             messages: Default::default(),
-        }
+            tags: vec![Default::default()]
+        };
+        return s;
     }
 }
 
@@ -67,9 +68,14 @@ pub struct TagchatApp {
 
     name: String,
     write_msg: String,
-    all_messages: Vec<Message>,
     shown_messages: Vec<Message>,
     search_pattern: String,
+    current_tag: Tag,
+
+    new_tag_name: String,
+    new_tag_color: [f32; 4],
+    delete_tag: Option<usize>,
+    change_messages_tag: Option<(usize, usize, Option<Tag>)>,
 
     send: Sender<Message>,
     recv: Receiver<Message>,
@@ -80,11 +86,17 @@ impl Default for TagchatApp {
         let (send, recv) = channel(1024);
         Self {
             state: Default::default(),
+
             name: Default::default(),
             write_msg: Default::default(),
-            all_messages: Default::default(),
             shown_messages: Default::default(),
             search_pattern: Default::default(),
+            current_tag: Default::default(),
+            
+            new_tag_name: Default::default(),
+            new_tag_color: Default::default(),
+            delete_tag: None,
+            change_messages_tag: None,
 
             send,
             recv,
@@ -101,20 +113,15 @@ impl TagchatApp {
         let rt = Builder::new_current_thread().enable_all().build().unwrap();
 
         let args: Args = Args::parse();
-
         let name = args.name.clone();
+        
         let addr = args.server_addr.clone();
-
-        let old_messeges: Vec<Message>;
-        let prev_state: SerializedState;
-        if let Some(storage) = _cc.storage {
-            prev_state = eframe::get_value(storage, eframe::APP_KEY).unwrap_or_default();
-            old_messeges = prev_state.get_messages(name.clone())
-        } else {
-            prev_state = Default::default();
-            old_messeges = Vec::new();
-        }
-
+        
+        let state: SerializedState = _cc.storage
+            .and_then(|storage| eframe::get_value(storage, eframe::APP_KEY))
+            .unwrap_or_default();
+        
+        let context = _cc.egui_ctx.clone();
         std::thread::spawn(move || {
             rt.block_on(async move {
                 let stream = TcpStream::connect(addr).await;
@@ -126,15 +133,9 @@ impl TagchatApp {
                     .unwrap();
 
                 let write_to_server = tokio::spawn(async move {
-                    while let Some(message) = recv.recv().await {
-                        match message {
-                            Message::FromMe(conent) => {
-                                write.write_all((conent + "\r\n").as_bytes()).await.unwrap();
-                            }
-                            _ => {
-                                panic!("Tried to send wrong message.");
-                            }
-                        }
+                    while let Some(Message { content, .. }) = recv.recv().await {
+                        let s = content + "\r\n";
+                        write.write_all((s).as_bytes()).await.unwrap();
                     }
                 });
 
@@ -144,9 +145,10 @@ impl TagchatApp {
                         let n_read = read.read(&mut buffer).await.unwrap();
                         if let Ok(raw_message) = String::from_utf8(buffer[..n_read].to_vec()) {
                             if let Some((sender, content)) = raw_message.split_once(':') {
-                                send.send(Message::ToMe(sender.to_string(), content.to_string()))
+                                send.send(Message { content: content.to_string(), tag: Default::default(), sender: sender.to_string() })
                                     .await
                                     .unwrap();
+                                context.request_repaint();
                             }
                         }
                     }
@@ -157,12 +159,16 @@ impl TagchatApp {
         });
 
         Self {
-            state: prev_state,
+            shown_messages: state.messages.clone(),
+            state,
             name: args.name.to_owned(),
             write_msg: "".to_owned(),
-            all_messages: old_messeges.clone(),
-            shown_messages: old_messeges,
             search_pattern: "".to_owned(),
+            current_tag: Default::default(),
+            new_tag_name: Default::default(),
+            new_tag_color: Default::default(),
+            delete_tag: None, 
+            change_messages_tag: None,
 
             send: my_send,
             recv: my_recv,
@@ -180,9 +186,13 @@ impl eframe::App for TagchatApp {
             state,
             name,
             write_msg,
-            all_messages,
             shown_messages,
             search_pattern,
+            ref mut current_tag,
+            ref mut new_tag_name,
+            ref mut new_tag_color,
+            ref mut delete_tag,
+            ref mut change_messages_tag,
             send,
             recv,
         } = self;
@@ -199,62 +209,183 @@ impl eframe::App for TagchatApp {
 
         // Writing new msg
         egui::TopBottomPanel::bottom("bottom_panel").show(ctx, |ui| {
-            ui.horizontal_centered(|ui| {
+            ui.horizontal_top(|ui| {
+                ui.set_min_height(100.);
                 ui.label("Write your message: ");
-                let response = ui.text_edit_singleline(write_msg);
-                if response.lost_focus() && ui.input().key_pressed(egui::Key::Enter) {
-                    let new_message = Message::FromMe(write_msg.to_string());
+                ui.add(egui::TextEdit::multiline(write_msg));
+                if ui.add(egui::Button::new("Send")).clicked() {
+                    let new_message = Message { content: write_msg.to_string(), tag: current_tag.clone(), sender: name.clone() };
                     send.blocking_send(new_message.clone()).unwrap_or_default();
-                    all_messages.push(new_message.clone());
-                    state.add_message(new_message.clone(), name.clone());
+                    state.messages.push(new_message.clone());
                     shown_messages.push(new_message);
                     write_msg.clear();
                 }
+
+                if ui.add(egui::Button::new(current_tag.name.clone())
+                    .stroke(egui::Stroke::new(3., current_tag.color))).clicked() {   
+                }
+                
+                ui.menu_button("Change tag", |ui| {
+                    let sa: egui::ScrollArea = egui::ScrollArea::vertical().max_height(50.);
+                    sa.show(ui, |ui| {
+                        if state.tags.iter().any(
+                            |tag| ui.radio_value(current_tag,  tag.clone(), tag.name.clone()).clicked())
+                        {
+                            ui.close_menu();
+                        }
+                    });
+                });
+                    
             });
         });
 
         if let Ok(message) = recv.try_recv() {
-            all_messages.push(message.clone());
-            state.add_message(message.clone(), "".to_string());
+            state.messages.push(message.clone());
             shown_messages.push(message);
         }
 
-        // searching
-        egui::SidePanel::left("side_panel").show(ctx, |ui| {
-            ui.horizontal(|ui| {
-                ui.label("Search: ");
-                let response = ui.text_edit_singleline(search_pattern);
-                if response.changed() {
-                    shown_messages.clear();
-                    for ref m in all_messages.clone() {
-                        let m_str = match m {
-                            Message::FromMe(content) => content,
-                            Message::ToMe(_, content) => content,
-                        };
 
-                        if m_str.contains(search_pattern.as_str()) {
-                            shown_messages.push(m.clone());
+        if let Some(tag_idx) = delete_tag {
+            state.tags.remove(*tag_idx);
+            *delete_tag = None;
+        }
+
+        egui::SidePanel::left("left_panel").show(ctx, |ui| {
+            ui.set_max_width(200.);
+            egui::CollapsingHeader::new("Your tags")
+                .default_open(false)
+                .show(ui, |ui| {
+                    for (i, tag) in state.tags.iter().enumerate() {
+                        ui.add(egui::Button::new(tag.name.clone())
+                        .stroke(egui::Stroke::new(3., tag.color))).context_menu(|ui| {
+                            if ui.button("Delete").clicked() {
+                                *delete_tag = Some(i);
+                                ui.close_menu();
+                            }
+                        });
+                    }
+    
+                    ui.horizontal(|ui| {
+                        ui.label("Add new tag");
+                        ui.text_edit_singleline(new_tag_name);
+                        ui.color_edit_button_rgba_unmultiplied(new_tag_color);
+
+                        if ui.button("Add").clicked() && 
+                            !new_tag_name.is_empty() {
+                            let [r, g, b, a] = new_tag_color.clone();
+                            state.tags.push(Tag {
+                                name: new_tag_name.clone(),
+                                color: egui::Rgba::from_rgba_unmultiplied(r, g, b, a),
+                            });
+
+                            *new_tag_name = Default::default();
+                            *new_tag_color = Default::default();
                         }
+                    });
+            });
+            
+            ui.label("Search: ");
+            let response = ui.text_edit_singleline(search_pattern);
+            if response.changed() {
+                shown_messages.clear();
+                for ref m in state.messages.clone() {
+
+                    if m.content.contains(search_pattern.as_str()) {
+                        shown_messages.push(m.clone());
                     }
                 }
-            });
+            }
+            
         });
+
+        egui::SidePanel::right("right_panel").show(ctx, |ui| {
+            ui.set_min_width(200.);
+            ui.label("Your friends");
+        });
+
+        if let Some((i, j, Some(chosen_tag))) = (*change_messages_tag).clone() {
+            let _ = &state.messages[i..(j+1)].iter_mut().for_each(|m| {
+                m.tag = chosen_tag.clone();
+            });
+            *change_messages_tag = None;
+        }
 
         // messages window
         egui::CentralPanel::default().show(ctx, |ui| {
             // The central panel the region left after adding TopPanel's and SidePanel's
             let mut sa: egui::ScrollArea = egui::ScrollArea::vertical();
-            sa = sa.max_height(f32::INFINITY);
-            sa.show(ui, |ui| {
-                for m in shown_messages.clone() {
-                    let (sender, content, align) = match m {
-                        Message::FromMe(content) => (name.clone(), content, egui::Align::RIGHT),
-                        Message::ToMe(sender, content) => (sender, content, egui::Align::LEFT),
-                    };
-                    let s = sender.clone() + ": " + &content;
-                    ui.with_layout(egui::Layout::top_down(align), |ui| {
-                        ui.label(egui::RichText::new(s).size(23.0));
-                    });
+            sa
+                .max_height(f32::INFINITY)
+                .stick_to_bottom()
+                .show(ui, |ui| {
+                    for (i, m) in shown_messages.iter_mut().enumerate() {
+                        let align = if m.sender.eq(name) {
+                            egui::Align::RIGHT
+                        } else {
+                            egui::Align::LEFT
+                        };
+
+                        ui.with_layout(egui::Layout::top_down(align), |ui| {
+                            let response = ui.add(egui::Button::new(egui::RichText::new(&m.content).size(23.0))
+                                .stroke(egui::Stroke::new(
+                            if let Some(true) = change_messages_tag.clone()
+                                    .and_then(|(_i, _j, _)| Some(_i <= i && i <= _j)).as_ref().as_ref() 
+                                    { 6. } else { 3. },
+                                    m.tag.color)));
+
+                            let popup_id = ui.make_persistent_id("my_unique_id");
+                            
+                            // let response = response.context_menu(|ui| {
+                            //     if let Some((i, j, _)) = change_messages_tag.clone() {
+                            //         dbg!("CREATING MENU BUTTON");
+                            //         let mut chosen_tag: Tag = Default::default();
+                            //         if state.tags.iter().any(
+                            //             |tag| ui.radio_value(&mut chosen_tag,  tag.clone(), tag.name.clone()).clicked())
+                            //         {
+                            //             *change_messages_tag = Some((min(i, j), max(i, j), Some(chosen_tag)));
+                            //             ui.close_menu();
+                            //             ctx.request_repaint();
+                            //         }
+                            //     }
+                            // });
+
+                            if response.secondary_clicked() {
+                                dbg!("DOUBLE CLICKING", change_messages_tag.clone());
+                                if let Some(true) = change_messages_tag.clone()
+                                    .and_then(|(_i, _j, _)| Some(i == _i && i == _j)) {
+                                    *change_messages_tag = None;
+                                    dbg!("CLICKED SAME");
+                                } else {
+                                    if let Some(true) = change_messages_tag.clone()
+                                    .and_then(|(_i, _j, _)| Some(_i == _j)) {
+                                        dbg!("CLICKED DIFFERENT");
+                                        let point = change_messages_tag.clone().unwrap().0;
+                                        *change_messages_tag = Some((min(i,  point), max(i, point), None));
+                                    } else {
+                                        dbg!("CLICKED FIRST");
+                                        *change_messages_tag = Some((i, i, None));
+                                    }
+                                    ui.memory().toggle_popup(popup_id);
+                                }
+                            }
+
+                            egui::popup::popup_below_widget(ui, popup_id, &response, |ui| {
+                                ui.button("Change tag").context_menu(|ui| {
+                                    let (i, j, _) = change_messages_tag.clone().unwrap();
+                                    dbg!("CREATING MENU BUTTON");
+                                    let mut chosen_tag: Tag = Default::default();
+                                    if state.tags.iter().any(
+                                        |tag| ui.radio_value(&mut chosen_tag,  tag.clone(), tag.name.clone()).clicked())
+                                    {
+                                        *change_messages_tag = Some((min(i, j), max(i, j), Some(chosen_tag)));
+                                        ui.close_menu();
+                                    }
+                                });
+                            });
+                        });
+                        
+                        // ui.add(egui::Label::new(egui::RichText::new(&m.sender).size(10.0)));
+                        ui.add_space(30.);
                 }
             });
         });

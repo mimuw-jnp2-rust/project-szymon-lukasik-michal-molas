@@ -9,7 +9,7 @@ fn main() {
 
     let native_options = eframe::NativeOptions::default();
     eframe::run_native(
-        "tagchat",
+        "TagChat",
         native_options,
         Box::new(|cc| Box::new(tagchat::TagchatApp::new(cc))),
     );
