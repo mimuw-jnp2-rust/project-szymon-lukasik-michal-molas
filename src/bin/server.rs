@@ -31,13 +31,13 @@ use tokio::sync::{mpsc, Mutex};
 use tokio_stream::StreamExt;
 use tokio_util::codec::{Framed, LinesCodec};
 
+use clap::Parser;
 use futures::SinkExt;
 use std::collections::HashMap;
 use std::error::Error;
 use std::io;
 use std::net::SocketAddr;
 use std::sync::Arc;
-use clap::Parser;
 
 #[derive(Parser, Debug, Clone)]
 #[clap(author, version, about, long_about = None)]
@@ -217,7 +217,7 @@ async fn process(
                 // broadcast this message to the other users.
                 Some(Ok(msg)) => {
                     let mut state = state.lock().await;
-                    let msg = format!("{}: {}", username, msg);
+                    let msg = format!("{}:{}", username, msg);
 
                     state.broadcast(addr, &msg).await;
                 }
