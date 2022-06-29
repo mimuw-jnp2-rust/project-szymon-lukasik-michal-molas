@@ -28,6 +28,7 @@ struct Message {
     content: String,
     tag: Tag,
     sender: String,
+    room_idx: usize,
 }
 
 #[derive(Parser, Debug, Clone)]
@@ -133,8 +134,8 @@ impl TagchatApp {
                 write.write_all((name + "\r\n").as_bytes()).await.unwrap();
 
                 let write_to_server = tokio::spawn(async move {
-                    while let Some(Message { content, .. }) = recv.recv().await {
-                        let s = content + "\r\n";
+                    while let Some(Message { content, room_idx, .. }) = recv.recv().await {
+                        let s = room_idx.to_string() + ":" + &content + "\r\n";
                         write.write_all((s).as_bytes()).await.unwrap();
                     }
                 });
@@ -144,15 +145,18 @@ impl TagchatApp {
                     loop {
                         let n_read = read.read(&mut buffer).await.unwrap();
                         if let Ok(raw_message) = String::from_utf8(buffer[..n_read].to_vec()) {
-                            if let Some((sender, content)) = raw_message.split_once(':') {
-                                send.send(Message {
-                                    content: content.to_string(),
-                                    tag: Default::default(),
-                                    sender: sender.to_string(),
-                                })
-                                .await
-                                .unwrap();
-                                context.request_repaint();
+                            if let Some((sender, room_content)) = raw_message.split_once(':') {
+                                if let Some((room, content)) = room_content.split_once(':') {
+                                    send.send(Message {
+                                        content: content.to_string(),
+                                        tag: Default::default(),
+                                        sender: sender.to_string(),
+                                        room_idx: room.parse::<usize>().unwrap(),
+                                    })
+                                    .await
+                                    .unwrap();
+                                    context.request_repaint();
+                                }
                             }
                         }
                     }
@@ -222,6 +226,7 @@ impl eframe::App for TagchatApp {
                         content: write_msg.to_string(),
                         tag: current_tag.clone(),
                         sender: name.clone(),
+                        room_idx: *current_room,
                     };
                     send.blocking_send(new_message.clone()).unwrap_or_default();
                     state.rooms[*current_room].push(new_message.clone());
@@ -251,7 +256,7 @@ impl eframe::App for TagchatApp {
         });
 
         if let Ok(message) = recv.try_recv() {
-            state.rooms[*current_room].push(message.clone());
+            state.rooms[message.room_idx].push(message.clone());
         }
 
         if let Some(tag_idx) = delete_tag {
@@ -302,7 +307,6 @@ impl eframe::App for TagchatApp {
                 .selected_text(format!("{:?}", current_room))
                 .show_ui(ui, |ui| {
                     for i in 0..state.rooms.len() {
-                        // let cr = *current_room;
                         if ui
                             .selectable_value(&mut *current_room, i, format!("{:?}", i))
                             .clicked()

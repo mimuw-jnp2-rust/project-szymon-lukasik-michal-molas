@@ -217,7 +217,7 @@ async fn process(
                 // broadcast this message to the other users.
                 Some(Ok(msg)) => {
                     let mut state = state.lock().await;
-                    let msg = format!("{}: {}", username, msg);
+                    let msg = format!("{}:{}", username, msg);
 
                     state.broadcast(addr, &msg).await;
                 }
