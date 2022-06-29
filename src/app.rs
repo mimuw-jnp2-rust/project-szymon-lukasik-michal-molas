@@ -2,6 +2,7 @@ use clap::Parser;
 use egui::CollapsingHeader;
 use futures::future::join_all;
 use std::cmp::{max, min};
+use std::collections::HashMap;
 use std::net::{SocketAddr, ToSocketAddrs};
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::TcpStream;
@@ -49,16 +50,19 @@ fn parse_addr(s: &str) -> Result<SocketAddr, String> {
 #[derive(serde::Deserialize, serde::Serialize, Debug)]
 #[serde(default)]
 struct SerializedState {
-    rooms: Vec<Vec<Message>>,
+    rooms: HashMap<String, Vec<Message>>,
     // messages: Vec<Message>,
     tags: Vec<Tag>,
 }
 
+
 impl Default for SerializedState {
+
     fn default() -> Self {
+        let mut rooms = HashMap::new();
+        rooms.insert("Wspólny".to_string(), vec![]);
         let s = Self {
-            rooms: vec![Default::default()],
-            // messages: Default::default(),
+            rooms,
             tags: vec![Default::default()],
         };
         return s;
@@ -72,8 +76,9 @@ pub struct TagchatApp {
     write_msg: String,
     search_pattern: String,
     current_tag: Tag,
-    current_room: usize,
+    current_room: String,
 
+    new_room: String,
     new_tag_name: String,
     new_tag_color: [f32; 4],
     delete_tag: Option<usize>,
@@ -93,8 +98,9 @@ impl Default for TagchatApp {
             write_msg: Default::default(),
             search_pattern: Default::default(),
             current_tag: Default::default(),
-            current_room: Default::default(),
+            current_room: "Wspólny".to_string(),
 
+            new_room: Default::default(),
             new_tag_name: Default::default(),
             new_tag_color: Default::default(),
             delete_tag: None,
@@ -168,7 +174,8 @@ impl TagchatApp {
             write_msg: "".to_owned(),
             search_pattern: "".to_owned(),
             current_tag: Default::default(),
-            current_room: Default::default(),
+            current_room: "Wspólny".to_string(),
+            new_room: Default::default(),
             new_tag_name: Default::default(),
             new_tag_color: Default::default(),
             delete_tag: None,
@@ -187,12 +194,13 @@ impl eframe::App for TagchatApp {
 
     fn update(&mut self, ctx: &egui::Context, frame: &mut eframe::Frame) {
         let Self {
-            state,
+            ref mut state,
             name,
             write_msg,
             search_pattern,
             ref mut current_tag,
-            current_room,
+            ref mut current_room,
+            ref mut new_room,
             ref mut new_tag_name,
             ref mut new_tag_color,
             ref mut delete_tag,
@@ -224,7 +232,7 @@ impl eframe::App for TagchatApp {
                         sender: name.clone(),
                     };
                     send.blocking_send(new_message.clone()).unwrap_or_default();
-                    state.rooms[*current_room].push(new_message.clone());
+                    state.rooms.get_mut(current_room).unwrap().push(new_message.clone());
                     write_msg.clear();
                 }
 
@@ -251,7 +259,7 @@ impl eframe::App for TagchatApp {
         });
 
         if let Ok(message) = recv.try_recv() {
-            state.rooms[*current_room].push(message.clone());
+            state.rooms.get_mut(current_room).unwrap().push(message.clone());
         }
 
         if let Some(tag_idx) = delete_tag {
@@ -301,18 +309,22 @@ impl eframe::App for TagchatApp {
             egui::ComboBox::from_label("Select room")
                 .selected_text(format!("{:?}", current_room))
                 .show_ui(ui, |ui| {
-                    for i in 0..state.rooms.len() {
-                        // let cr = *current_room;
-                        if ui
-                            .selectable_value(&mut *current_room, i, format!("{:?}", i))
-                            .clicked()
-                        {}
-                    }
+                    if state.rooms.keys().any(|key| 
+                        ui
+                        .selectable_value(&mut *current_room, key.clone(), key.clone())
+                        .clicked())
+                    {}
                 });
 
-            if ui.add(egui::Button::new("Add new room")).clicked() {
-                state.rooms.push(Vec::new());
-            }
+            ui.horizontal(|ui| {
+                ui.text_edit_singleline(new_room );
+                
+                if ui.add(egui::Button::new("Add new room")).clicked()
+                    && !new_room.is_empty() && !state.rooms.contains_key(new_room) {
+                    state.rooms.insert(new_room.clone(), vec![]);
+                    new_room.clear();
+                } 
+            });
         });
 
         egui::SidePanel::right("right_panel").show(ctx, |ui| {
@@ -327,7 +339,7 @@ impl eframe::App for TagchatApp {
             sa.max_height(f32::INFINITY)
                 .stick_to_bottom()
                 .show(ui, |ui| {
-                    for (m_idx, m) in state.rooms[*current_room]
+                    for (m_idx, m) in state.rooms[current_room]
                         .clone()
                         .iter()
                         .filter(|m| m.content.contains(search_pattern.as_str()))
@@ -380,7 +392,7 @@ impl eframe::App for TagchatApp {
                                         response.context_menu(|ui| {
                                             if ui.button("Delete").clicked() {
                                                 ui.close_menu();
-                                                state.rooms[*current_room].drain(i..(j + 1));
+                                                state.rooms.get_mut(current_room).unwrap().drain(i..(j + 1));
                                                 *marked_messages = None;
                                                 ctx.request_repaint();
                                             }
@@ -398,7 +410,7 @@ impl eframe::App for TagchatApp {
                                                         .clicked()
                                                     }) {
                                                         ui.close_menu();
-                                                        let _ = &state.rooms[*current_room]
+                                                        let _ = &state.rooms.get_mut(current_room).unwrap()
                                                             [i..(j + 1)]
                                                             .iter_mut()
                                                             .for_each(|m| {
