@@ -1,4 +1,5 @@
 use clap::Parser;
+use egui::CollapsingHeader;
 use futures::future::join_all;
 use std::net::{SocketAddr, ToSocketAddrs};
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
@@ -68,14 +69,13 @@ pub struct TagchatApp {
 
     name: String,
     write_msg: String,
-    shown_messages: Vec<Message>,
     search_pattern: String,
     current_tag: Tag,
 
     new_tag_name: String,
     new_tag_color: [f32; 4],
     delete_tag: Option<usize>,
-    change_messages_tag: Option<(usize, usize, Option<Tag>)>,
+    marked_messages: Option<(usize, usize)>,
 
     send: Sender<Message>,
     recv: Receiver<Message>,
@@ -89,14 +89,13 @@ impl Default for TagchatApp {
 
             name: Default::default(),
             write_msg: Default::default(),
-            shown_messages: Default::default(),
             search_pattern: Default::default(),
             current_tag: Default::default(),
             
             new_tag_name: Default::default(),
             new_tag_color: Default::default(),
             delete_tag: None,
-            change_messages_tag: None,
+            marked_messages: None,
 
             send,
             recv,
@@ -159,7 +158,6 @@ impl TagchatApp {
         });
 
         Self {
-            shown_messages: state.messages.clone(),
             state,
             name: args.name.to_owned(),
             write_msg: "".to_owned(),
@@ -168,7 +166,7 @@ impl TagchatApp {
             new_tag_name: Default::default(),
             new_tag_color: Default::default(),
             delete_tag: None, 
-            change_messages_tag: None,
+            marked_messages: None,
 
             send: my_send,
             recv: my_recv,
@@ -186,13 +184,12 @@ impl eframe::App for TagchatApp {
             state,
             name,
             write_msg,
-            shown_messages,
             search_pattern,
             ref mut current_tag,
             ref mut new_tag_name,
             ref mut new_tag_color,
             ref mut delete_tag,
-            ref mut change_messages_tag,
+            ref mut marked_messages,
             send,
             recv,
         } = self;
@@ -217,7 +214,6 @@ impl eframe::App for TagchatApp {
                     let new_message = Message { content: write_msg.to_string(), tag: current_tag.clone(), sender: name.clone() };
                     send.blocking_send(new_message.clone()).unwrap_or_default();
                     state.messages.push(new_message.clone());
-                    shown_messages.push(new_message);
                     write_msg.clear();
                 }
 
@@ -241,7 +237,6 @@ impl eframe::App for TagchatApp {
 
         if let Ok(message) = recv.try_recv() {
             state.messages.push(message.clone());
-            shown_messages.push(message);
         }
 
 
@@ -282,20 +277,10 @@ impl eframe::App for TagchatApp {
                             *new_tag_color = Default::default();
                         }
                     });
-            });
+            });    
             
             ui.label("Search: ");
-            let response = ui.text_edit_singleline(search_pattern);
-            if response.changed() {
-                shown_messages.clear();
-                for ref m in state.messages.clone() {
-
-                    if m.content.contains(search_pattern.as_str()) {
-                        shown_messages.push(m.clone());
-                    }
-                }
-            }
-            
+            ui.text_edit_singleline(search_pattern);
         });
 
         egui::SidePanel::right("right_panel").show(ctx, |ui| {
@@ -303,22 +288,16 @@ impl eframe::App for TagchatApp {
             ui.label("Your friends");
         });
 
-        if let Some((i, j, Some(chosen_tag))) = (*change_messages_tag).clone() {
-            let _ = &state.messages[i..(j+1)].iter_mut().for_each(|m| {
-                m.tag = chosen_tag.clone();
-            });
-            *change_messages_tag = None;
-        }
-
         // messages window
         egui::CentralPanel::default().show(ctx, |ui| {
             // The central panel the region left after adding TopPanel's and SidePanel's
-            let mut sa: egui::ScrollArea = egui::ScrollArea::vertical();
+            let sa: egui::ScrollArea = egui::ScrollArea::vertical();
             sa
                 .max_height(f32::INFINITY)
                 .stick_to_bottom()
                 .show(ui, |ui| {
-                    for (i, m) in shown_messages.iter_mut().enumerate() {
+                    for (m_idx, m) in state.messages.clone().iter()
+                        .filter(|m| m.content.contains(search_pattern.as_str())).enumerate() {
                         let align = if m.sender.eq(name) {
                             egui::Align::RIGHT
                         } else {
@@ -328,60 +307,57 @@ impl eframe::App for TagchatApp {
                         ui.with_layout(egui::Layout::top_down(align), |ui| {
                             let response = ui.add(egui::Button::new(egui::RichText::new(&m.content).size(23.0))
                                 .stroke(egui::Stroke::new(
-                            if let Some(true) = change_messages_tag.clone()
-                                    .and_then(|(_i, _j, _)| Some(_i <= i && i <= _j)).as_ref().as_ref() 
+                            if let Some(true) = marked_messages.clone()
+                                    .and_then(|(i, j)| Some(i <= m_idx && m_idx <= j))
                                     { 6. } else { 3. },
                                     m.tag.color)));
 
-                            let popup_id = ui.make_persistent_id("my_unique_id");
-                            
-                            // let response = response.context_menu(|ui| {
-                            //     if let Some((i, j, _)) = change_messages_tag.clone() {
-                            //         dbg!("CREATING MENU BUTTON");
-                            //         let mut chosen_tag: Tag = Default::default();
-                            //         if state.tags.iter().any(
-                            //             |tag| ui.radio_value(&mut chosen_tag,  tag.clone(), tag.name.clone()).clicked())
-                            //         {
-                            //             *change_messages_tag = Some((min(i, j), max(i, j), Some(chosen_tag)));
-                            //             ui.close_menu();
-                            //             ctx.request_repaint();
-                            //         }
-                            //     }
-                            // });
-
-                            if response.secondary_clicked() {
-                                dbg!("DOUBLE CLICKING", change_messages_tag.clone());
-                                if let Some(true) = change_messages_tag.clone()
-                                    .and_then(|(_i, _j, _)| Some(i == _i && i == _j)) {
-                                    *change_messages_tag = None;
-                                    dbg!("CLICKED SAME");
-                                } else {
-                                    if let Some(true) = change_messages_tag.clone()
-                                    .and_then(|(_i, _j, _)| Some(_i == _j)) {
-                                        dbg!("CLICKED DIFFERENT");
-                                        let point = change_messages_tag.clone().unwrap().0;
-                                        *change_messages_tag = Some((min(i,  point), max(i, point), None));
+                            if search_pattern.is_empty() {
+                                if response.clicked() {
+                                    if let Some(true) = marked_messages.clone()
+                                        .and_then(|(i, j)| Some(m_idx == i && i == j)) {
+                                        *marked_messages = None;
                                     } else {
-                                        dbg!("CLICKED FIRST");
-                                        *change_messages_tag = Some((i, i, None));
+                                        if let Some(true) = marked_messages.clone()
+                                        .and_then(|(i, j)| Some(i == j)) {
+                                            let point = marked_messages.clone().unwrap().0;
+                                            *marked_messages = Some((min(m_idx,  point), max(m_idx, point)));
+                                        } else {
+                                            *marked_messages = Some((m_idx, m_idx));
+                                        }
                                     }
-                                    ui.memory().toggle_popup(popup_id);
+                                }
+
+                                if let Some((i, j)) = marked_messages.clone() {
+                                    if i <= m_idx && m_idx <= j {
+                                        response.context_menu(|ui| {
+
+                                            if ui.button("Delete").clicked() {
+                                                ui.close_menu();
+                                                state.messages.drain(i..(j+1));
+                                                *marked_messages = None;
+                                                ctx.request_repaint();
+                                            }
+    
+                                            egui::CollapsingHeader::new("Change tag")
+                                                .default_open(false)
+                                                .show(ui, |ui| {
+                                                    let mut chosen_tag: Tag = m.tag.clone();
+                                                    if state.tags.iter().any(
+                                                        |tag| ui.radio_value(&mut chosen_tag,  tag.clone(), tag.name.clone()).clicked())
+                                                    {
+                                                        ui.close_menu();
+                                                        let _ = &state.messages[i..(j+1)].iter_mut().for_each(|m| {
+                                                            m.tag = chosen_tag.clone();
+                                                        });
+                                                        *marked_messages = None;
+                                                        ctx.request_repaint();
+                                                    }
+                                                });
+                                        });
+                                    }
                                 }
                             }
-
-                            egui::popup::popup_below_widget(ui, popup_id, &response, |ui| {
-                                ui.button("Change tag").context_menu(|ui| {
-                                    let (i, j, _) = change_messages_tag.clone().unwrap();
-                                    dbg!("CREATING MENU BUTTON");
-                                    let mut chosen_tag: Tag = Default::default();
-                                    if state.tags.iter().any(
-                                        |tag| ui.radio_value(&mut chosen_tag,  tag.clone(), tag.name.clone()).clicked())
-                                    {
-                                        *change_messages_tag = Some((min(i, j), max(i, j), Some(chosen_tag)));
-                                        ui.close_menu();
-                                    }
-                                });
-                            });
                         });
                         
                         // ui.add(egui::Label::new(egui::RichText::new(&m.sender).size(10.0)));
