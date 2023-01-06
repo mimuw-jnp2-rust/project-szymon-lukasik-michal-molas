@@ -16,7 +16,7 @@ crate-type = ["cdylib", "rlib"]
 egui = "0.18.0"
 eframe = { version = "0.18.0", features = ["persistence"] }
 serde = { version = "1", features = ["derive"] } # You only need this if you want app persistence
-tokio = { version = "1.0.0", features = ["full", "tracing"] }
+tokio = { version = "1.18.4", features = ["full", "tracing"] }
 tokio-util = { version = "0.7.0", features = ["full"] }
 tokio-stream = { version = "0.1" }
 
